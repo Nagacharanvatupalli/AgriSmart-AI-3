@@ -352,11 +352,6 @@ export default function AuthPage({ onAuthSuccess }: { onAuthSuccess: (name?: str
       if (response.ok) {
         localStorage.setItem('token', data.token);
 
-        // Special Admin Redirection (updated for OTP logic)
-        if (formData.mobile === '7893439082' && formData.mobileOtp === '123456') {
-          // Optional: Handle hardcoded debug OTP if needed, otherwise normal flow
-        }
-
         const firstName = data.user?.profile?.firstName || '';
         const lastName = data.user?.profile?.lastName || '';
         const fullName = [firstName, lastName].filter(Boolean).join(' ') || data.user?.mobile || '';

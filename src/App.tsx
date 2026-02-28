@@ -559,13 +559,21 @@ export default function App() {
           setIsLoggedIn(true);
           setUserName(name || '');
           if (user) setFullUser(user);
-          navigate('/dashboard');
+          if (user?.mobile === '7893439082' || user?.mobile === '+917893439082') {
+            navigate('/admin-dashboard');
+          } else {
+            navigate('/dashboard');
+          }
         }} />} />
         <Route path="/register" element={<AuthPage onAuthSuccess={(name?: string, user?: any) => {
           setIsLoggedIn(true);
           setUserName(name || '');
           if (user) setFullUser(user);
-          navigate('/dashboard');
+          if (user?.mobile === '7893439082' || user?.mobile === '+917893439082') {
+            navigate('/admin-dashboard');
+          } else {
+            navigate('/dashboard');
+          }
         }} />} />
         <Route path="/dashboard" element={
           <ProtectedRoute isLoggedIn={isLoggedIn}>
