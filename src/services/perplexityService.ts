@@ -64,51 +64,45 @@ export const getPerplexityAdvice = async (query: string, language = 'en') => {
 };
 
 export const detectCropDisease = async (base64Image: string, mimeType: string, language = 'en') => {
-    if (!PERPLEXITY_API_KEY) {
-        throw new Error("Perplexity API key is missing");
-    }
-
     try {
-        const languageName = LANG_NAME[language] || 'English';
+        // Construct the payload expected by our Flask /predict endpoint
+        // You can adjust the IP/Port if your Flask server runs elsewhere
+        const ML_BACKEND_URL = 'http://127.0.0.1:5000/predict';
 
-        const systemText = `You are an elite agricultural pathologist. Analyze this crop image. Identify the plant and detect diseases/pests. Provide a direct diagnosis and a short, actionable treatment plan. BE CONCISE. Use clear headings. DO NOT include citations or bracketed numbers. Respond in ${languageName}.`;
+        console.log(`Sending image to local ML backend at ${ML_BACKEND_URL}...`);
+
+        // Include mimeType if needed, but app.py expects a raw base64 string
+        const payload = {
+            image: `data:${mimeType};base64,${base64Image}`,
+            language: language // In case you want to implement localization in Python later
+        };
 
         const response = await axios.post(
-            'https://api.perplexity.ai/chat/completions',
-            {
-                model: 'sonar',
-                messages: [
-                    {
-                        role: 'user',
-                        content: [
-                            {
-                                type: 'text',
-                                text: systemText
-                            },
-                            {
-                                type: 'image_url',
-                                image_url: {
-                                    url: `data:${mimeType};base64,${base64Image}`
-                                }
-                            }
-                        ]
-                    }
-                ],
-                temperature: 0.2,
-                top_p: 0.9,
-                max_tokens: 1500,
-            },
+            ML_BACKEND_URL,
+            payload,
             {
                 headers: {
-                    'Authorization': `Bearer ${PERPLEXITY_API_KEY}`,
                     'Content-Type': 'application/json'
-                }
+                },
+                // Add an explicit timeout since ML inference might take a few seconds
+                timeout: 30000
             }
         );
 
-        return response.data.choices[0].message.content;
-    } catch (error) {
-        console.error("Error calling Perplexity API for vision diagnosis:", error);
-        throw error;
+        // The Flask app returns { "result": "Markdown formatted string..." }
+        if (response.data && response.data.result) {
+            return response.data.result;
+        } else {
+            throw new Error("Unexpected response format from ML backend");
+        }
+
+    } catch (error: any) {
+        console.error("Error calling local ML backend for vision diagnosis:", error);
+
+        if (error.response && error.response.status === 503) {
+            throw new Error("The ML model is not loaded on the server. Please train the model using train_cnn.py first.");
+        }
+
+        throw new Error(error.response?.data?.error || error.message || "Failed to analyze image with local CNN model.");
     }
 };
