@@ -309,12 +309,23 @@ router.get('/prices', authMiddleware, async (req, res) => {
         let marketResults = await fetchFromDataGov(crop as string, market as string);
         let dataSourceLabel = 'data.gov.in (Agmarknet)';
 
-        // Final check: If still no official data, we stop here to ensure "Real Time Official Data" requirement
+        // Step 2: Fallback to Perplexity AI if official data is unavailable
         if (!marketResults || marketResults.length === 0) {
-            console.log('[MARKET API] No official data found for today.');
+            console.log(`[MARKET API] Official API failed/empty, falling back to Perplexity for ${crop}`);
+            marketResults = await fetchFromPerplexity(crop as string, market as string);
+            dataSourceLabel = 'AI Estimated (Perplexity)';
+
+            if (marketResults) {
+                marketResults.forEach((r: any) => r.source = dataSourceLabel);
+            }
+        }
+
+        // Final check: If both fail, return error
+        if (!marketResults || marketResults.length === 0) {
+            console.log('[MARKET API] No official or AI data found for today.');
             return res.status(404).json({
-                message: `No official market records found for "${crop}" at "${market}" for today.`,
-                code: 'NO_OFFICIAL_DATA'
+                message: `No market records found for "${crop}" at "${market}" for today.`,
+                code: 'NO_DATA'
             });
         }
 

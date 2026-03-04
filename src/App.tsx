@@ -496,8 +496,8 @@ export default function App() {
       navigate('/diagnosis');
 
       try {
-        // Direct expert diagnosis using Perplexity Vision
-        const result = await detectCropDisease(base64.split(',')[1], file.type, i18n.language || 'en');
+        // Direct expert diagnosis using Gemini Vision
+        const result = await getVisualSymptoms(base64.split(',')[1], file.type);
         setDiagnosisResult(result || "Could not generate diagnosis.");
 
         // Auto-save result if genuine
@@ -537,11 +537,7 @@ export default function App() {
     setIsTyping(true);
 
     try {
-      let response = await getPerplexityAdvice(userMsg, i18n.language || 'en', fullUser);
-      // Failsafe: Remove citation brackets [1], [2], etc.
-      if (response) {
-        response = response.replace(/\[\d+\]/g, '').trim();
-      }
+      let response = await getAgriculturalAdvice(userMsg, undefined, i18n.language || 'en');
       setChatMessages(prev => [...prev, { role: 'ai', content: response || "I'm sorry, I couldn't process that." }]);
     } catch (error) {
       setChatMessages(prev => [...prev, { role: 'ai', content: "Error communicating with AI assistant." }]);
