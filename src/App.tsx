@@ -34,8 +34,7 @@ import Markdown from 'react-markdown';
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
 import { format } from 'date-fns';
-import { getAgriculturalAdvice, getSeasonalInsights } from './services/geminiService';
-import { diagnoseCrop } from './services/cropDoctorService';
+import { getVisualSymptoms, getAgriculturalAdvice, getSeasonalInsights } from './services/geminiService';
 import { getPerplexityAdvice, detectCropDisease } from './services/perplexityService';
 import { getWeatherData } from './services/weatherService';
 import Navbar from './components/Navbar';
@@ -497,8 +496,8 @@ export default function App() {
       navigate('/diagnosis');
 
       try {
-        // Layered diagnosis: Govt sources → Gemini fallback
-        const result = await diagnoseCrop(base64.split(',')[1], file.type);
+        // Direct expert diagnosis using Gemini Vision
+        const result = await getVisualSymptoms(base64.split(',')[1], file.type);
         setDiagnosisResult(result || "Could not generate diagnosis.");
 
         // Auto-save result if genuine

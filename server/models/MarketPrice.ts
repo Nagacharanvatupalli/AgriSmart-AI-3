@@ -13,6 +13,8 @@ interface IMarketPrice extends Document {
     modal_price: number;
     yesterday_modal_price?: number;
     is_primary_cache?: boolean;
+    is_nearby_suggestion?: boolean;
+    alert_message?: string;
     date: Date;
     source: string;
 }
@@ -30,6 +32,8 @@ const MarketPriceSchema = new mongoose.Schema({
     modal_price: { type: Number },
     yesterday_modal_price: { type: Number },
     is_primary_cache: { type: Boolean },
+    is_nearby_suggestion: { type: Boolean, default: false },
+    alert_message: { type: String, default: '' },
     date: { type: Date, required: true },
     source: { type: String },
 }, { timestamps: true });

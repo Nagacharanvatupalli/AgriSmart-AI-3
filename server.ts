@@ -8,7 +8,6 @@ import authRoutes from './server/routes/auth';
 import diagnosisRoutes from './server/routes/diagnosis';
 import adminRoutes from './server/routes/admin';
 import marketRoutes from './server/routes/market';
-import cropDoctorRoutes from './server/routes/cropDoctor';
 import os from 'os';
 
 async function startServer() {
@@ -26,7 +25,6 @@ async function startServer() {
   app.use('/api/diagnosis', diagnosisRoutes);
   app.use('/api/admin', adminRoutes);
   app.use('/api/market', marketRoutes);
-  app.use('/api/crop-doctor', cropDoctorRoutes);
 
   if (process.env.NODE_ENV !== 'production') {
     const vite = await createViteServer({
