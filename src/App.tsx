@@ -499,7 +499,7 @@ export default function App() {
 
       try {
         // Direct expert diagnosis using Gemini Vision
-        const result = await getVisualSymptoms(base64.split(',')[1], file.type);
+        const result = await getVisualSymptoms(base64.split(',')[1], file.type, i18n.language || 'en');
         setDiagnosisResult(result || "Could not generate diagnosis.");
 
         // Auto-save result if genuine

@@ -3,11 +3,19 @@ import { GoogleGenerativeAI } from "@google/generative-ai";
 const apiKey = (import.meta as any).env?.VITE_GEMINI_API_KEY || "";
 const genAI = new GoogleGenerativeAI(apiKey);
 
+const LANG_NAME: Record<string, string> = {
+  en: "English",
+  te: "Telugu",
+  hi: "Hindi",
+  ta: "Tamil",
+};
+
 // ─── Visual Symptoms ──────────────────────────────────────────────────────────
-export const getVisualSymptoms = async (base64Image: string, mimeType: string) => {
+export const getVisualSymptoms = async (base64Image: string, mimeType: string, language = "en") => {
+  const languageName = LANG_NAME[language] || "English";
   const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
   const prompt =
-    "Act as a specialized agricultural vision system. Analyze this crop image and provide a highly detailed, objective list of visual symptoms. Focus on: leaf color changes, spot patterns (size, color, margin), stem condition, insect presence, and growth anomalies. Do NOT provide a diagnosis or treatment plan. Just describe exactly what is visible in a structured list.";
+    `Act as a specialized agricultural vision system. Analyze this crop image and provide a highly detailed, objective list of visual symptoms. Focus on: leaf color changes, spot patterns (size, color, margin), stem condition, insect presence, and growth anomalies. Do NOT provide a diagnosis or treatment plan. Just describe exactly what is visible in a structured list. Respond in ${languageName}.`;
 
   const imagePart = {
     inlineData: {
@@ -24,12 +32,7 @@ export const getVisualSymptoms = async (base64Image: string, mimeType: string) =
 const adviceCache = new Map<string, { text: string; ts: number }>();
 const CACHE_TTL = 1000 * 60 * 5; // 5 minutes
 
-const LANG_NAME: Record<string, string> = {
-  en: "English",
-  te: "Telugu",
-  hi: "Hindi",
-  ta: "Tamil",
-};
+
 
 // ─── Agricultural Advice ──────────────────────────────────────────────────────
 export const getAgriculturalAdvice = async (
