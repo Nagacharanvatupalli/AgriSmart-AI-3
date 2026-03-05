@@ -268,6 +268,7 @@ export default function App() {
   const [userName, setUserName] = useState('');
   const [fullUser, setFullUser] = useState<any>(null);
   const [isProfileLoading, setIsProfileLoading] = useState(false);
+  const [isAuthRestored, setIsAuthRestored] = useState(false);
   const [currentCaseId, setCurrentCaseId] = useState('');
   const fileInputRef = useRef<HTMLInputElement>(null);
   const chatEndRef = useRef<HTMLDivElement>(null);
@@ -276,12 +277,13 @@ export default function App() {
   useEffect(() => {
     const token = localStorage.getItem('token');
     const storedName = localStorage.getItem('userName');
-    const storedLocation = localStorage.getItem('userLocation');
+
     if (token) {
       setIsLoggedIn(true);
       setUserName(storedName || '');
       fetchUserProfile(token);
     }
+    setIsAuthRestored(true);
   }, []);
 
   // Keep userName in sync with fullUser
@@ -545,6 +547,14 @@ export default function App() {
       setIsTyping(false);
     }
   };
+
+  if (!isAuthRestored) {
+    return (
+      <div className="h-screen w-full flex items-center justify-center bg-white">
+        <Loader2 className="animate-spin text-primary" size={48} />
+      </div>
+    );
+  }
 
   return (
     <div className="bg-white min-h-screen">
