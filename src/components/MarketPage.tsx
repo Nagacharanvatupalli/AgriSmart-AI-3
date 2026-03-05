@@ -32,6 +32,8 @@ interface MarketData {
     commodity: string;
     market: string;
     is_primary: boolean;
+    is_nearby_suggestion: boolean;
+    alert_message: string;
     state: string;
     district: string;
     grade1_price: number;
@@ -602,6 +604,25 @@ export default function MarketPage({ user }: MarketPageProps) {
                                     animate={{ opacity: 1, y: 0 }}
                                     className="space-y-8"
                                 >
+                                    {/* Nearby Suggestion Alert */}
+                                    {marketData && marketData.length > 0 && marketData[0].is_nearby_suggestion && (
+                                        <motion.div
+                                            initial={{ opacity: 0, y: -10 }}
+                                            animate={{ opacity: 1, y: 0 }}
+                                            className="flex items-start gap-4 px-6 py-4 bg-amber-50 border border-amber-200 rounded-[24px] shadow-sm"
+                                        >
+                                            <div className="mt-0.5 flex-shrink-0 w-8 h-8 bg-amber-100 rounded-full flex items-center justify-center">
+                                                <AlertCircle size={18} className="text-amber-600" />
+                                            </div>
+                                            <div>
+                                                <p className="text-sm font-bold text-amber-800">{t('market.nearby_alert_title', 'Showing Nearby Market Data')}</p>
+                                                <p className="text-sm text-amber-700 mt-0.5 leading-relaxed">
+                                                    {marketData[0].alert_message || `"${selectedCrop}" is not traded at ${searchMarket}. Showing data from the nearest available markets instead.`}
+                                                </p>
+                                            </div>
+                                        </motion.div>
+                                    )}
+
                                     {/* Verification Badge */}
                                     <div className="flex items-center gap-3 px-6 py-3 bg-white rounded-[24px] border border-gray-100 w-fit shadow-sm">
                                         <div className="w-8 h-8 rounded-full bg-[#00ab55]/10 flex items-center justify-center">

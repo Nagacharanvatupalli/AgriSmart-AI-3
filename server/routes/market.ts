@@ -3,11 +3,12 @@ import axios from 'axios';
 import dotenv from 'dotenv';
 import MarketPrice from '../models/MarketPrice';
 import { authMiddleware } from '../middleware/authMiddleware';
+import { GoogleGenerativeAI } from '@google/generative-ai';
 
 dotenv.config();
 
 const router = express.Router();
-const PERPLEXITY_API_KEY = process.env.PERPLEXITY_API_KEY;
+const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || '');
 
 // Official data.gov.in API for APMC market prices
 const DATA_GOV_API_KEY = '579b464db66ec23bdd000001cdd3946e44ce4aad7209ff7b23ac571b';
@@ -45,10 +46,9 @@ async function checkRecentCache(crop: string, market: string) {
         const cached = await MarketPrice.find({
             commodity: crop,
             date: { $gte: today, $lte: endOfDay }
-        }).sort({ is_primary: -1 }); // Primary market first
+        }).sort({ is_primary: -1 });
 
         if (cached && cached.length > 0) {
-            // Check if our specific market is in the results
             const hasPrimary = cached.some(m => m.market.toLowerCase() === market.toLowerCase());
             if (hasPrimary) return cached;
         }
@@ -78,7 +78,7 @@ async function fetchFromDataGov(crop: string, searchLocation: string, retryCount
             return response.data?.records;
         } catch (err: any) {
             if (err.response?.status === 429) {
-                throw err; // Let the outer wrapper handle the retry natively
+                throw err;
             }
             console.log(`[MARKET API] data.gov.in fetch failed for ${filterKey}=${filterValue}:`, err.message);
             return null;
@@ -86,28 +86,17 @@ async function fetchFromDataGov(crop: string, searchLocation: string, retryCount
     };
 
     try {
-        // Try 1: Exact matches as Market Name
         let records = await fetchWithFilter('market', searchLocation);
+        if (!records || records.length === 0) records = await fetchWithFilter('district', searchLocation);
+        if (!records || records.length === 0) records = await fetchWithFilter('state', searchLocation);
 
-        // Try 2: Matches as District Name
-        if (!records || records.length === 0) {
-            records = await fetchWithFilter('district', searchLocation);
-        }
+        if (!records || !Array.isArray(records) || records.length === 0) return null;
 
-        // Try 3: Matches as State Name
-        if (!records || records.length === 0) {
-            records = await fetchWithFilter('state', searchLocation);
-        }
-
-        if (!records || !Array.isArray(records) || records.length === 0) {
-            return null;
-        }
-
-        // Transform data.gov.in format to our app format
         const results = records.map((r: any, index: number) => ({
-            commodity: crop, // Keep original app name for consistency
+            commodity: crop,
             market: r.market || searchLocation,
             is_primary: index === 0,
+            is_nearby_suggestion: false,
             state: r.state || '',
             district: r.district || '',
             grade1_price: parseFloat(r.max_price || r.modal_price) || 0,
@@ -129,7 +118,6 @@ async function fetchFromDataGov(crop: string, searchLocation: string, retryCount
         }
         const unique = Array.from(seen.values());
 
-        // Ensure the primary logic correctly highlights the closest match if possible
         if (unique.length > 0) {
             unique.forEach(u => u.is_primary = false);
             const exactMatch = unique.find(u =>
@@ -154,75 +142,70 @@ async function fetchFromDataGov(crop: string, searchLocation: string, retryCount
     }
 }
 
-// Fallback: Fetch from Perplexity AI
-async function fetchFromPerplexity(crop: string, market: string): Promise<any[] | null> {
-    if (!PERPLEXITY_API_KEY) return null;
-
+// Fallback: Fetch from Gemini AI with nearby commodity suggestion
+async function fetchFromGemini(crop: string, market: string): Promise<{ data: any[] | null; isNearbySuggestion: boolean; alertMessage: string }> {
     try {
-        const query = `Find the latest wholesale/APMC market prices for the commodity "${crop}" at or near "${market}" market in India.
-Include the primary market "${market}" and at least 2 nearby APMC markets trading "${crop}".
-For each market provide 3 quality grade prices (Grade 1 = best, Grade 3 = lowest) per 100 kg (quintal).
-Also include yesterday's modal price if available.
+        const model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash' });
+        const today = new Date().toISOString().split('T')[0];
 
-CRITICAL: You MUST respond with ONLY a valid JSON array. No explanations, no markdown, no code fences, no text before or after. If exact data is unavailable, provide your best reasonable estimate based on nearby markets and recent trends. Never return empty or non-JSON.
+        const prompt = `You are an agricultural market data assistant for India. A farmer in "${market}" is looking for wholesale/APMC market prices for "${crop}".
 
-JSON format per object:
-{"commodity":"string","market":"string","is_primary":true/false,"state":"string","district":"string","grade1_price":number,"grade2_price":number,"grade3_price":number,"modal_price":number,"date":"YYYY-MM-DD","yesterday_modal_price":number,"source":"string"}
+Task:
+1. Check if "${crop}" is commonly traded at or near "${market}" APMCs in India.
+2. If YES: Provide current price estimates for "${crop}" at "${market}" and 2-3 nearby markets.
+3. If NO: Find the closest APMC market or district where "${crop}" IS traded and provide those prices instead. Also flag this as a nearby suggestion.
 
-Return ONLY the JSON array starting with [ and ending with ]. Nothing else.`;
+Return ONLY a valid JSON object with this exact structure:
+{
+  "found_in_area": true/false,
+  "alert_message": "string - message if showing nearby data, empty if exact match",
+  "markets": [
+    {
+      "commodity": "${crop}",
+      "market": "Market Name",
+      "district": "District",
+      "state": "State",
+      "is_primary": true/false,
+      "is_nearby_suggestion": true/false,
+      "grade1_price": number,
+      "grade2_price": number,
+      "grade3_price": number,
+      "modal_price": number,
+      "min_price": number,
+      "max_price": number,
+      "yesterday_modal_price": number,
+      "date": "${today}",
+      "source": "AI Estimated (Gemini)"
+    }
+  ]
+}
 
-        const systemPrompt = 'You are an agricultural market data API. You ONLY output valid JSON arrays. Never output explanations, apologies, or markdown. If exact prices are unavailable, estimate using nearby market data and recent trends. Always return a valid JSON array with at least 1 entry.';
+Prices should be in INR per quintal (100 kg). Use realistic current market estimates based on your knowledge of Indian agricultural commodity prices. Return ONLY the JSON, no explanation.`;
 
-        const makeCall = async (prompt: string, system: string) => {
-            const resp = await axios.post(
-                'https://api.perplexity.ai/chat/completions',
-                {
-                    model: 'sonar',
-                    messages: [
-                        { role: 'system', content: system },
-                        { role: 'user', content: prompt }
-                    ],
-                    temperature: 0.1,
-                },
-                {
-                    headers: {
-                        'Authorization': `Bearer ${PERPLEXITY_API_KEY}`,
-                        'Content-Type': 'application/json'
-                    },
-                    timeout: 30000
-                }
-            );
-            return resp.data.choices[0].message.content;
-        };
+        const result = await model.generateContent(prompt);
+        const raw = result.response.text();
 
-        const parseJsonArray = (raw: string) => {
-            try {
-                const s = raw.indexOf('[');
-                const e = raw.lastIndexOf(']');
-                if (s !== -1 && e !== -1 && e > s) {
-                    const parsed = JSON.parse(raw.substring(s, e + 1));
-                    if (Array.isArray(parsed) && parsed.length > 0) return parsed;
-                }
-            } catch { }
-            return null;
-        };
+        // Extract JSON from response
+        const start = raw.indexOf('{');
+        const end = raw.lastIndexOf('}');
+        if (start === -1 || end === -1) return { data: null, isNearbySuggestion: false, alertMessage: '' };
 
-        let rawContent = await makeCall(query, systemPrompt);
-        let results = parseJsonArray(rawContent);
-
-        if (!results) {
-            console.log('[MARKET API] Perplexity first attempt failed, retrying...');
-            const retryQuery = `Return a JSON array of current market prices for "${crop}" near "${market}", India. Format:
-[{"commodity":"${crop}","market":"${market}","is_primary":true,"state":"","district":"","grade1_price":0,"grade2_price":0,"grade3_price":0,"modal_price":0,"date":"${new Date().toISOString().split('T')[0]}","yesterday_modal_price":0,"source":"Agmarknet"}]
-Fill in real or estimated values. Include 2-3 markets. Return ONLY the JSON array.`;
-            rawContent = await makeCall(retryQuery, 'Output only a valid JSON array. No other text.');
-            results = parseJsonArray(rawContent);
+        const parsed = JSON.parse(raw.substring(start, end + 1));
+        if (!parsed.markets || !Array.isArray(parsed.markets) || parsed.markets.length === 0) {
+            return { data: null, isNearbySuggestion: false, alertMessage: '' };
         }
 
-        return results;
+        const isNearby = !parsed.found_in_area;
+        return {
+            data: parsed.markets,
+            isNearbySuggestion: isNearby,
+            alertMessage: parsed.alert_message || (isNearby
+                ? `"${crop}" is not commonly traded at ${market}. Showing prices from the nearest available markets instead.`
+                : '')
+        };
     } catch (err: any) {
-        console.log('[MARKET API] Perplexity fetch failed:', err.message);
-        return null;
+        console.log('[MARKET API] Gemini fetch failed:', err.message);
+        return { data: null, isNearbySuggestion: false, alertMessage: '' };
     }
 }
 
@@ -240,13 +223,12 @@ router.get('/prices', authMiddleware, async (req, res) => {
         const startOfToday = new Date();
         startOfToday.setHours(0, 0, 0, 0);
 
-        // Fetch today's records for this commodity using Case-Insensitive regex
+        // Check if we already fetched for this specific primary market today
         const todaysRecords = await MarketPrice.find({
             commodity: { $regex: new RegExp(`^${crop}$`, 'i') },
             date: { $gte: startOfToday }
         }).sort({ date: -1 });
 
-        // Check if we already fetched for this specific primary market today
         const hasPrimaryToday = todaysRecords.some((r: any) =>
             r.is_primary_cache === true &&
             (r.market.toLowerCase().includes((market as string).toLowerCase()) ||
@@ -255,8 +237,6 @@ router.get('/prices', authMiddleware, async (req, res) => {
 
         if (hasPrimaryToday && todaysRecords.length > 0) {
             console.log('[MARKET API] Returning cached market data from DB for today.');
-
-            // Format to match expected API output without hitting Perplexity
             const processedResults = await Promise.all(todaysRecords.slice(0, 5).map(async (dbRecord: any) => {
                 const dbPreviousPrice = await MarketPrice.findOne({
                     commodity: { $regex: new RegExp(`^${dbRecord.commodity}$`, 'i') },
@@ -279,6 +259,8 @@ router.get('/prices', authMiddleware, async (req, res) => {
                     district: dbRecord.district,
                     state: dbRecord.state,
                     is_primary: dbRecord.is_primary_cache || false,
+                    is_nearby_suggestion: dbRecord.is_nearby_suggestion || false,
+                    alert_message: dbRecord.alert_message || '',
                     grade1_price: dbRecord.grade1_price || dbRecord.max_price || 0,
                     grade2_price: dbRecord.grade2_price || dbRecord.modal_price || 0,
                     grade3_price: dbRecord.grade3_price || dbRecord.min_price || 0,
@@ -287,7 +269,7 @@ router.get('/prices', authMiddleware, async (req, res) => {
                     modal_price: dbRecord.modal_price || 0,
                     yesterday_modal_price: previousModalPrice || 0,
                     date: dbRecord.date.toISOString().split('T')[0],
-                    source: dbRecord.source || 'Agmarknet Admin',
+                    source: dbRecord.source || 'Agmarknet',
                     previous_modal_price: previousModalPrice || null,
                     previous_date: dbPreviousPrice ? dbPreviousPrice.date.toISOString().split('T')[0] : 'Yesterday/Previous',
                     percentage_change: percentageChange.toFixed(2),
@@ -298,29 +280,30 @@ router.get('/prices', authMiddleware, async (req, res) => {
             return res.json(processedResults);
         }
 
-        // Step 0: Check MongoDB cache first for today's data (redundant with above but keeps logic safe)
-        const cachedResults = await checkRecentCache(crop as string, market as string);
-        if (cachedResults) {
-            console.log(`[MARKET API] Returning cached results for ${crop}`);
-            return res.json(cachedResults);
-        }
-
-        // Step 1: Try official data.gov.in API first (Exact Match)
+        // Step 1: Try official data.gov.in API
         let marketResults = await fetchFromDataGov(crop as string, market as string);
         let dataSourceLabel = 'data.gov.in (Agmarknet)';
+        let isNearbySuggestion = false;
+        let alertMessage = '';
 
-        // Step 2: Fallback to Perplexity AI if official data is unavailable
+        // Step 2: Fallback to Gemini AI if official data is unavailable
         if (!marketResults || marketResults.length === 0) {
-            console.log(`[MARKET API] Official API failed/empty, falling back to Perplexity for ${crop}`);
-            marketResults = await fetchFromPerplexity(crop as string, market as string);
-            dataSourceLabel = 'AI Estimated (Perplexity)';
+            console.log(`[MARKET API] Official API failed/empty, falling back to Gemini for ${crop}`);
+            const geminiResult = await fetchFromGemini(crop as string, market as string);
+            marketResults = geminiResult.data;
+            isNearbySuggestion = geminiResult.isNearbySuggestion;
+            alertMessage = geminiResult.alertMessage;
+            dataSourceLabel = 'AI Estimated (Gemini)';
 
             if (marketResults) {
-                marketResults.forEach((r: any) => r.source = dataSourceLabel);
+                marketResults.forEach((r: any) => {
+                    r.source = dataSourceLabel;
+                    r.is_nearby_suggestion = isNearbySuggestion;
+                    r.alert_message = alertMessage;
+                });
             }
         }
 
-        // Final check: If both fail, return error
         if (!marketResults || marketResults.length === 0) {
             console.log('[MARKET API] No official or AI data found for today.');
             return res.status(404).json({
@@ -329,7 +312,7 @@ router.get('/prices', authMiddleware, async (req, res) => {
             });
         }
 
-        console.log(`[MARKET API] Got ${marketResults.length} results from ${dataSourceLabel}`);
+        console.log(`[MARKET API] Got ${marketResults.length} results from ${dataSourceLabel}${isNearbySuggestion ? ' [nearby suggestion]' : ''}`);
 
         const processedResults = await Promise.all(marketResults.map(async (rawData: any) => {
             const currentData = {
@@ -341,7 +324,6 @@ router.get('/prices', authMiddleware, async (req, res) => {
                 yesterday_modal_price: parseFloat(rawData.yesterday_modal_price) || 0
             };
 
-            // Parse date
             let currentDate: Date;
             if (currentData.date && currentData.date.includes('/')) {
                 const parts = currentData.date.split('/');
@@ -350,7 +332,6 @@ router.get('/prices', authMiddleware, async (req, res) => {
                 currentDate = new Date(currentData.date);
             }
             if (isNaN(currentDate.getTime())) currentDate = new Date();
-
             currentData.date = currentDate;
 
             try {
@@ -363,7 +344,12 @@ router.get('/prices', authMiddleware, async (req, res) => {
                             $lt: new Date(new Date(currentDate).setHours(23, 59, 59, 999))
                         }
                     },
-                    { ...currentData, is_primary_cache: currentData.is_primary },
+                    {
+                        ...currentData,
+                        is_primary_cache: currentData.is_primary,
+                        is_nearby_suggestion: isNearbySuggestion,
+                        alert_message: alertMessage
+                    },
                     { upsert: true, new: true }
                 );
             } catch (dbErr) {
@@ -391,6 +377,8 @@ router.get('/prices', authMiddleware, async (req, res) => {
             return {
                 ...currentData,
                 date: currentDate.toISOString().split('T')[0],
+                is_nearby_suggestion: isNearbySuggestion,
+                alert_message: alertMessage,
                 previous_modal_price: previousModalPrice || null,
                 previous_date: dbPreviousPrice ? dbPreviousPrice.date.toISOString().split('T')[0] : 'Yesterday/Previous',
                 percentage_change: percentageChange.toFixed(2),
